@@ -33,7 +33,11 @@ router.patch('/messages/:id', requireAuth, async (req, res) => {
     if (io) io.emit('chat-message-edited', formatted)
     res.json(formatted)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    const msg = err?.message || 'Failed to update'
+    if (msg.includes('allowed in Global Chat') || msg === 'Message is empty.') {
+      return res.status(400).json({ error: msg })
+    }
+    res.status(500).json({ error: msg })
   }
 })
 

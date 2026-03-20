@@ -143,13 +143,22 @@ function stopIdleBroadcast() {
   }
 }
 
-function broadcastOnlineCount() {
-  const count = io.engine?.clientsCount ?? 0
-  io.emit('online-count', count)
-}
-
 // GDD 6.1: Presence for Mercy Pot — page: terminal|bunker, terminalActive (in round), bunkerFocused (tab focus)
 const presenceBySocket = new Map()
+
+/** Same metric as Mercy Pot `signalsDetected`: terminal/bunker presence rows, else raw client count. */
+function getSignalsDetected(io) {
+  let signalsDetected = 0
+  presenceBySocket.forEach((p) => {
+    if (p.page === 'terminal' || p.page === 'bunker') signalsDetected++
+  })
+  if (signalsDetected === 0) signalsDetected = io.engine?.clientsCount ?? 0
+  return signalsDetected
+}
+
+function broadcastOnlineCount() {
+  io.emit('online-count', getSignalsDetected(io))
+}
 const COOLDOWN_MS = 15 * 60 * 1000
 const intensityAlertCooldown = { 3: 0, 4: 0, 5: 0 }
 let lastIntensityLevel = 0
@@ -183,12 +192,10 @@ function runMercyPotTick(io) {
   const round = gameEngine.activeRounds?.get?.(GLOBAL_ROUND_ID)
   const terminalActiveCount = round?.participants?.size ?? 0
   let bunkerIdleCount = 0
-  let signalsDetected = 0
   presenceBySocket.forEach((p) => {
     if (p.page === 'bunker' && p.bunkerFocused) bunkerIdleCount++
-    if (p.page === 'terminal' || p.page === 'bunker') signalsDetected++
   })
-  if (signalsDetected === 0) signalsDetected = io.engine?.clientsCount ?? 0
+  const signalsDetected = getSignalsDetected(io)
   mercyPotAddPresence(terminalActiveCount, bunkerIdleCount)
   mercyPotFlush(signalsDetected).then(() => {
     const level = getIntensityLevel(signalsDetected)
@@ -227,12 +234,12 @@ async function runOracleIdleTick(io) {
 // Socket.io connection handling
 io.on('connection', async (socket) => {
   console.log('Client connected:', socket.id)
-  const count = io.engine?.clientsCount ?? 0
-  socket.emit('online-count', count)
+  const signals = getSignalsDetected(io)
+  socket.emit('online-count', signals)
   broadcastOnlineCount()
   try {
     const total = await mercyPotGetTotal()
-    socket.emit('mercy-pot-update', { total, velocity: 0, signalsDetected: count })
+    socket.emit('mercy-pot-update', { total, velocity: 0, signalsDetected: signals })
   } catch (e) { /* ignore */ }
 
   socket.on('mercy-presence', (data) => {
@@ -242,6 +249,7 @@ io.on('connection', async (socket) => {
     const userId = data?.userId && typeof data.userId === 'string' ? data.userId : null
     presenceBySocket.set(socket.id, { page, terminalActive, bunkerFocused, userId })
     socket.join(page)
+    broadcastOnlineCount()
   })
 
   const globalRound = gameEngine.activeRounds?.get?.(GLOBAL_ROUND_ID)

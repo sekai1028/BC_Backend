@@ -6,7 +6,8 @@ import {
   getTotalPlayers,
   getTop,
   getRankByTotalSiphoned,
-  getEntryByDisplayName
+  getEntryByDisplayName,
+  searchByDisplayName
 } from '../services/leaderboardService.js'
 
 const router = express.Router()
@@ -143,6 +144,24 @@ router.get('/top', async (req, res) => {
     const list = await getTop(limit, sort, page)
     const totalPlayers = await getTotalPlayers()
     res.json({ entries: list, totalPlayers })
+  } catch (err) {
+    res.status(500).json({ message: err.message })
+  }
+})
+
+/**
+ * GET /api/leaderboard/search?q=name&sort=totalSiphoned|biggestExtract|biggestLoss
+ * Case-insensitive exact match on displayName (paste from chat). Rank uses the same sort as the tabs.
+ */
+router.get('/search', async (req, res) => {
+  try {
+    const raw = req.query.q
+    const q = typeof raw === 'string' ? raw : ''
+    const sortParam = req.query.sort
+    const sort = sortParam === 'biggestLoss' ? 'biggestLoss' : sortParam === 'biggestExtract' ? 'biggestExtract' : 'totalSiphoned'
+    const results = await searchByDisplayName(q, sort)
+    const totalPlayers = await getTotalPlayers()
+    res.json({ results, totalPlayers, query: q.trim() })
   } catch (err) {
     res.status(500).json({ message: err.message })
   }

@@ -1,7 +1,19 @@
 import ChatMessage from '../models/ChatMessage.js'
 import User from '../models/User.js'
+import { chatTextPassesFilter } from '../config/chatFilter.js'
+
+const MAX_CHAT_LEN = 200
 
 class ChatService {
+  validateOutgoingText(raw) {
+    const text = typeof raw === 'string' ? raw.trim().slice(0, MAX_CHAT_LEN) : ''
+    const check = chatTextPassesFilter(text)
+    if (!check.ok) {
+      throw new Error(check.error || 'Message not allowed.')
+    }
+    return text
+  }
+
   async sendMessage(data) {
     const { userId, username, rank, message } = data
     if (userId) {
@@ -10,37 +22,25 @@ class ChatService {
         throw new Error('You are banned from Global Chat.')
       }
     }
-    // Basic profanity filter (expand this)
-    const filteredMessage = this.filterProfanity(message)
-    
+    const safeText = this.validateOutgoingText(message)
+
     const chatMessage = await ChatMessage.create({
       userId,
       username,
       rank,
-      message: filteredMessage,
+      message: safeText,
       standing: 0 // TODO: Calculate standing
     })
-    
+
     return this.formatMessage({
       _id: chatMessage._id,
       userId: chatMessage.userId,
       username,
       rank,
-      message: filteredMessage,
+      message: safeText,
       isSystem: false,
       createdAt: chatMessage.createdAt,
     })
-  }
-
-  filterProfanity(text) {
-    // Basic filter - expand with actual banned words list
-    const bannedWords = ['spam', 'test'] // Add more
-    let filtered = text
-    bannedWords.forEach(word => {
-      const regex = new RegExp(word, 'gi')
-      filtered = filtered.replace(regex, '***')
-    })
-    return filtered
   }
 
   getStandingColor(standing) {
@@ -95,8 +95,7 @@ class ChatService {
     if (!msg) return null
     const ownerId = msg.userId?.toString?.() ?? String(msg.userId)
     if (ownerId !== String(userId)) return null
-    const filtered = this.filterProfanity((newText || '').trim().slice(0, 200))
-    if (!filtered) return null
+    const filtered = this.validateOutgoingText(newText)
     const updated = await ChatMessage.findByIdAndUpdate(
       messageId,
       { message: filtered },
@@ -111,6 +110,14 @@ class ChatService {
     if (!msg) return false
     const ownerId = msg.userId?.toString?.() ?? String(msg.userId)
     if (ownerId !== String(userId)) return false
+    await ChatMessage.findByIdAndDelete(messageId)
+    return true
+  }
+
+  /** Moderation: delete any message by id (admin only — route must enforce). */
+  async deleteMessageAdmin(messageId) {
+    const msg = await ChatMessage.findById(messageId).lean()
+    if (!msg) return false
     await ChatMessage.findByIdAndDelete(messageId)
     return true
   }

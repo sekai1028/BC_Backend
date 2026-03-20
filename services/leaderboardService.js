@@ -58,6 +58,37 @@ export async function upsertGuestEntry(guestId, displayName, profit, biggestExtr
 
 const SORT_FIELDS = ['totalSiphoned', 'biggestExtract', 'biggestLoss']
 
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Find all leaderboard rows whose displayName matches (case-insensitive exact trim).
+ * Returns ranked rows for the active sort column (same ranking rules as top list).
+ */
+export async function searchByDisplayName(query, sortBy = 'biggestExtract') {
+  const q = (query || '').trim()
+  if (!q || q.length > 64) return []
+  const field = SORT_FIELDS.includes(sortBy) ? sortBy : 'totalSiphoned'
+  const regex = new RegExp(`^${escapeRegex(q)}$`, 'i')
+  const matches = await LeaderboardEntry.find({ displayName: regex }).lean()
+  const results = []
+  for (const entry of matches) {
+    const value = entry[field] ?? 0
+    const above = await LeaderboardEntry.countDocuments({ [field]: { $gt: value } })
+    results.push({
+      rank: above + 1,
+      displayName: entry.displayName,
+      totalSiphoned: entry.totalSiphoned ?? 0,
+      biggestExtract: entry.biggestExtract ?? 0,
+      biggestLoss: entry.biggestLoss ?? 0,
+      source: entry.source
+    })
+  }
+  results.sort((a, b) => a.rank - b.rank || a.displayName.localeCompare(b.displayName))
+  return results
+}
+
 /**
  * Get rank (1-based) and stats for a user. Returns null if no entry.
  * sortBy: 'totalSiphoned' | 'biggestExtract' | 'biggestLoss' — rank is computed by that field (default totalSiphoned).
