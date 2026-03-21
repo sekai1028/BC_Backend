@@ -191,13 +191,14 @@ router.post('/ban-chat', async (req, res) => {
 /**
  * GET /api/admin/users — list users for admin UI.
  * Optional ?q= — search username / email (substring, case-insensitive) or exact MongoDB ObjectId.
- * Optional ?limit= — default 500 (no q) or 100 (with q), max 500.
+ * Optional ?page= (1-based, default 1) and ?pageSize= (default 25, max 100).
  */
 router.get('/users', async (req, res) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
-    const defaultLimit = q ? 100 : 500
-    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || defaultLimit))
+    const page = Math.max(1, Number(req.query.page) || 1)
+    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 25))
+    const skip = (page - 1) * pageSize
 
     let mongoQuery = {}
     if (q) {
@@ -215,12 +216,21 @@ router.get('/users', async (req, res) => {
       }
     }
 
+    const total = await User.countDocuments(mongoQuery)
     const list = await User.find(mongoQuery)
       .select('username email gold rank totalSiphoned bannedFromChat createdAt')
       .sort({ createdAt: -1 })
-      .limit(limit)
+      .skip(skip)
+      .limit(pageSize)
       .lean()
-    res.json({ users: list.map((u) => ({ ...u, id: u._id.toString() })) })
+    const totalPages = Math.max(1, Math.ceil(total / pageSize))
+    res.json({
+      users: list.map((u) => ({ ...u, id: u._id.toString() })),
+      total,
+      page,
+      pageSize,
+      totalPages,
+    })
   } catch (e) {
     res.status(500).json({ message: e.message })
   }
