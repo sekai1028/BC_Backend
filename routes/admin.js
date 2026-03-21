@@ -9,6 +9,7 @@ import { requireAdmin } from '../middleware/adminAuth.js'
 import { chatService } from '../services/chatService.js'
 import { getEconomyConfig, setEconomyConfig, invalidateEconomyCache } from '../config/economy.js'
 import { getIO } from '../services/socketIO.js'
+import { setTotalAdmin } from '../services/mercyPotService.js'
 
 const router = express.Router()
 router.use(requireAdmin)
@@ -88,6 +89,71 @@ router.post('/reset-gold', async (req, res) => {
 })
 
 const MAX_GIVE_GOLD = 1_000_000_000
+
+/**
+ * PATCH /api/admin/users/:id/username — force-change username (moderation).
+ * Body: { username: string }
+ */
+router.patch('/users/:id/username', async (req, res) => {
+  try {
+    const { id } = req.params
+    const raw = typeof req.body?.username === 'string' ? req.body.username.trim() : ''
+    if (!raw || raw.length < 2 || raw.length > 32) {
+      return res.status(400).json({ message: 'username must be 2–32 characters' })
+    }
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: 'Invalid user id' })
+    }
+    const taken = await User.findOne({ username: raw, _id: { $ne: id } })
+    if (taken) return res.status(400).json({ message: 'Username already taken' })
+    const user = await User.findByIdAndUpdate(id, { $set: { username: raw } }, { new: true })
+    if (!user) return res.status(404).json({ message: 'User not found' })
+    res.json({ ok: true, userId: user._id.toString(), username: user.username })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
+  }
+})
+
+/** POST /api/admin/adjust-gold — add or remove gold (signed delta) */
+router.post('/adjust-gold', async (req, res) => {
+  try {
+    const { userId, delta } = req.body || {}
+    const d = Number(delta)
+    if (!userId || !Number.isFinite(d)) {
+      return res.status(400).json({ message: 'userId and delta (number) required' })
+    }
+    const MAX = 1_000_000_000
+    if (Math.abs(d) > MAX) return res.status(400).json({ message: 'delta too large' })
+    let user = await User.findByIdAndUpdate(userId, { $inc: { gold: d } }, { new: true })
+    if (!user) return res.status(404).json({ message: 'User not found' })
+    if (user.gold < 0) {
+      user = await User.findByIdAndUpdate(userId, { $set: { gold: 0 } }, { new: true })
+    }
+    res.json({ ok: true, userId: user._id.toString(), gold: user.gold, delta: d })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
+  }
+})
+
+/** PATCH /api/admin/mercy-pot — set global mercy pot total or reset to 0 */
+router.patch('/mercy-pot', async (req, res) => {
+  try {
+    const { total, reset } = req.body || {}
+    const io = getIO()
+    if (reset === true) {
+      await setTotalAdmin(0, io)
+      return res.json({ ok: true, total: 0 })
+    }
+    const t = Number(total)
+    if (!Number.isFinite(t) || t < 0) {
+      return res.status(400).json({ message: 'total must be a non-negative number, or use reset: true' })
+    }
+    await setTotalAdmin(t, io)
+    res.json({ ok: true, total: t })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
+  }
+})
 
 /** POST /api/admin/give-gold — add gold to a user (positive increment only) */
 router.post('/give-gold', async (req, res) => {

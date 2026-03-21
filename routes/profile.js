@@ -4,12 +4,14 @@ import LeaderboardEntry from '../models/LeaderboardEntry.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getVaultConfig, getVaultUpgradeInfo } from '../utils/vaultLevels.js'
 import { ORACLE_LEVELS } from '../utils/oracleLevels.js'
+import { getSscBalance } from '../utils/sscBalance.js'
 
 const router = express.Router()
 const USERNAME_COST_GOLD = 500
 
 function toClientUser(doc) {
   if (!doc) return null
+  const bal = getSscBalance(doc)
   return {
     id: doc._id.toString(),
     username: doc.username || doc.email?.split('@')[0] || 'Exile',
@@ -18,13 +20,20 @@ function toClientUser(doc) {
     xp: doc.xp ?? 0,
     verified: !!doc.verified,
     gold: doc.gold ?? 0,
-    metal: doc.metal ?? 0,
+    metal: bal,
+    sscBalance: bal,
+    user_ssc_balance: bal,
+    sscEarned: bal,
+    propagandaFilter: !!doc.propagandaFilter,
+    leaderboardBunkerTag: !!doc.leaderboardBunkerTag,
+    leaderboardGlowColor: doc.leaderboardGlowColor || '#00FF41',
     twoFactorEnabled: !!doc.twoFactorEnabled,
     metalMod: doc.metalMod ?? 0,
     oracleMod: doc.oracleMod ?? 0,
     wagerCap: doc.wagerCap ?? getVaultConfig(doc.vaultLevel ?? 1).wagerCap,
     vaultLevel: doc.vaultLevel ?? 1,
-    oracleLevel: doc.oracleLevel ?? 1
+    oracleLevel: doc.oracleLevel ?? 1,
+    vaultLegendUnlocked: !!doc.vaultLegendUnlocked
   }
 }
 

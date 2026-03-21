@@ -3,8 +3,24 @@ import { addContribution as mercyPotAdd } from './mercyPotService.js'
 import { checkAndUnlock } from './achievementService.js'
 import { getCeiling, getFloor } from '../utils/oracleLevels.js'
 import { getHeadlineForTier } from '../config/headlinePools.js'
+import { SSC_PER_SECOND_ROUND } from '../config/sscConstants.js'
+import { getSscBalance } from '../utils/sscBalance.js'
 
 const GLOBAL_ROUND_ID = 'global'
+
+/**
+ * Report-only SSC for round banner — idle loop is the master clock; do not credit twice.
+ * Elapsed = fold time − round join (createdAt), capped by round duration (ms).
+ */
+function computeSscReportForRound(roundDoc) {
+  if (!roundDoc) return 0
+  const created = roundDoc.createdAt ? new Date(roundDoc.createdAt).getTime() : Date.now()
+  const elapsedMs = Date.now() - created
+  const durMs = roundDoc.duration != null ? Number(roundDoc.duration) : Infinity
+  const capSec = Number.isFinite(durMs) ? Math.max(0, durMs / 1000) : Infinity
+  const elapsedSec = Math.max(0, Math.min(elapsedMs / 1000, capSec))
+  return elapsedSec * SSC_PER_SECOND_ROUND
+}
 
 class GameEngine {
   constructor() {
@@ -528,6 +544,9 @@ class GameEngine {
         await roundDoc.save()
       }
       let newAchievements = []
+      let sscEarnedThisRound = 0
+      let metalAfterFold = null
+      let sscEarnedTotal = null
       if (participant.userId) {
         const User = (await import('../models/User.js')).default
         const user = await User.findById(participant.userId)
@@ -553,8 +572,13 @@ class GameEngine {
           } else {
             user.currentStreak = 0
           }
+          if (roundDoc) {
+            sscEarnedThisRound = computeSscReportForRound(roundDoc)
+          }
           await user.save()
           goldAfterFold = user.gold
+          metalAfterFold = getSscBalance(user)
+          sscEarnedTotal = getSscBalance(user)
           const tr = user.totalRounds || 0
           const rw = user.roundsWon || 0
           stats = {
@@ -587,6 +611,11 @@ class GameEngine {
         profit,
         wager: participant.wager,
         gold: goldAfterFold,
+        metal: metalAfterFold ?? undefined,
+        sscBalance: metalAfterFold ?? undefined,
+        user_ssc_balance: metalAfterFold ?? undefined,
+        sscEarnedThisRound: sscEarnedThisRound > 0 ? sscEarnedThisRound : undefined,
+        sscEarnedTotal: sscEarnedTotal != null ? sscEarnedTotal : undefined,
         stats,
         leaderboardRank: leaderboardRank ?? undefined,
         leaderboardTotalPlayers: leaderboardTotalPlayers ?? undefined,
@@ -609,6 +638,12 @@ class GameEngine {
       let leaderboardRank = null
       let leaderboardTotalPlayers = null
       let newAchievements = []
+      let sscEarnedThisRound = 0
+      let metalAfterFold = null
+      let sscEarnedTotal = null
+      const RoundModel = (await import('../models/Round.js')).default
+      const ridMem = participant.roundId != null ? (typeof participant.roundId === 'string' ? participant.roundId : String(participant.roundId)) : null
+      const roundDocMem = ridMem ? await RoundModel.findById(ridMem).select('duration createdAt').lean() : null
       if (participant.userId) {
         const User = (await import('../models/User.js')).default
         const user = await User.findById(participant.userId)
@@ -634,8 +669,13 @@ class GameEngine {
           } else {
             user.currentStreak = 0
           }
+          if (roundDocMem) {
+            sscEarnedThisRound = computeSscReportForRound(roundDocMem)
+          }
           await user.save()
           goldAfterFold = user.gold
+          metalAfterFold = getSscBalance(user)
+          sscEarnedTotal = getSscBalance(user)
           const tr = user.totalRounds || 0
           const rw = user.roundsWon || 0
           stats = {
@@ -668,6 +708,11 @@ class GameEngine {
         profit,
         wager: participant.wager,
         gold: goldAfterFold,
+        metal: metalAfterFold ?? undefined,
+        sscBalance: metalAfterFold ?? undefined,
+        user_ssc_balance: metalAfterFold ?? undefined,
+        sscEarnedThisRound: sscEarnedThisRound > 0 ? sscEarnedThisRound : undefined,
+        sscEarnedTotal: sscEarnedTotal != null ? sscEarnedTotal : undefined,
         stats,
         leaderboardRank: leaderboardRank ?? undefined,
         leaderboardTotalPlayers: leaderboardTotalPlayers ?? undefined,
@@ -688,9 +733,11 @@ class GameEngine {
     const profit = round.wager * (Math.max(0, finalMultiplier) - 1.0)
     const payout = round.wager + profit
     let stats = null
+    let sscEarnedThisRound = 0
+    let sscEarnedTotal = null
+    let metalAfterFold = null
 
     if (!this.memoryOnly) {
-      const Round = (await import('../models/Round.js')).default
       const User = (await import('../models/User.js')).default
       round.folded = true
       round.foldMultiplier = finalMultiplier
@@ -715,7 +762,10 @@ class GameEngine {
           } else {
             user.currentStreak = 0
           }
+          sscEarnedThisRound = computeSscReportForRound(round)
           await user.save()
+          metalAfterFold = getSscBalance(user)
+          sscEarnedTotal = getSscBalance(user)
           const tr = user.totalRounds || 0
           const rw = user.roundsWon || 0
           stats = {
@@ -738,6 +788,11 @@ class GameEngine {
       profit,
       wager: round.wager,
       gold,
+      metal: metalAfterFold ?? undefined,
+      sscBalance: metalAfterFold ?? undefined,
+      user_ssc_balance: metalAfterFold ?? undefined,
+      sscEarnedThisRound: sscEarnedThisRound > 0 ? sscEarnedThisRound : undefined,
+      sscEarnedTotal: sscEarnedTotal != null ? sscEarnedTotal : undefined,
       stats
     }
   }

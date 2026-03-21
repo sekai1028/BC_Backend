@@ -34,6 +34,24 @@ export async function getTotal() {
   }
 }
 
+/** Admin: set singleton Mercy Pot total (reset or manual correction). Broadcasts to clients. */
+export async function setTotalAdmin(newTotal, io) {
+  const t = Math.max(0, Number(newTotal) || 0)
+  try {
+    const MercyPot = (await import('../models/MercyPot.js')).default
+    const pot = await MercyPot.getInstance()
+    pot.total = t
+    pot.velocity = 0
+    pot.lastUpdated = new Date()
+    await pot.save()
+    if (io) io.emit('mercy-pot-update', { total: pot.total, velocity: 0, signalsDetected: 0 })
+    return pot
+  } catch (e) {
+    console.warn('[mercyPotService] setTotalAdmin failed:', e?.message)
+    throw e
+  }
+}
+
 /** Flush bucket to DB and broadcast. GDD 6: New_Total + Global_Velocity (SSC/sec). Call every 10s with signalsDetected. */
 export async function flush(signalsDetected = 0) {
   const sum = bucket.length > 0 ? bucket.reduce((a, b) => a + b, 0) : 0

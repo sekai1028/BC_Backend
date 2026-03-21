@@ -3,7 +3,7 @@
  * Set ADMIN_SECRET in env; client sends header X-Admin-Secret or Authorization: Bearer <ADMIN_SECRET>.
  */
 export function requireAdmin(req, res, next) {
-  const secret = process.env.ADMIN_SECRET
+  const secret = process.env.ADMIN_SECRET || process.env.ADMIN_SECRET_KEY
   if (!secret) {
     return res.status(503).json({ message: 'Admin not configured' })
   }

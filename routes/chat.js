@@ -3,6 +3,7 @@ import mongoose from 'mongoose'
 import { chatService } from '../services/chatService.js'
 import ChatMessage from '../models/ChatMessage.js'
 import ChatReport from '../models/ChatReport.js'
+import User from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 
 const router = express.Router()
@@ -67,6 +68,13 @@ router.post('/report', requireAuth, async (req, res) => {
     if (!messageId) return res.status(400).json({ error: 'messageId required' })
     const msg = await ChatMessage.findById(messageId)
     if (!msg) return res.status(404).json({ error: 'Message not found' })
+    const [author, reporter] = await Promise.all([
+      msg.userId ? User.findById(msg.userId).select('username').lean() : null,
+      User.findById(req.user._id).select('username').lean(),
+    ])
+    const authorName = author?.username || 'Unknown'
+    const reporterName = reporter?.username || req.user.username || 'Unknown'
+    const messageText = (msg.message || '').toString().slice(0, 500)
     await ChatReport.create({
       reportedBy: req.user._id,
       messageId: msg._id,
@@ -79,7 +87,16 @@ router.post('/report', requireAuth, async (req, res) => {
       try {
         const { sendAdminNotification } = await import('../services/emailService.js')
         if (typeof sendAdminNotification === 'function') {
-          await sendAdminNotification('Chat report', `Message ${messageId} reported by ${req.user.username}. Reason: ${reason || 'none'}`)
+          const body = [
+            'User Reported Chat Message',
+            '',
+            `Message: ${messageText}`,
+            `Author: ${authorName} (${msg.userId || 'n/a'})`,
+            `Reported by: ${reporterName} (${req.user._id})`,
+            `Reason: ${(reason || '').trim() || 'none'}`,
+            `Message ID: ${messageId}`,
+          ].join('\n')
+          await sendAdminNotification('User Reported Chat Message', body)
         }
       } catch (e) { /* ignore */ }
     }

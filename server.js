@@ -20,12 +20,14 @@ import supportRoutes from './routes/support.js'
 import achievementRoutes from './routes/achievements.js'
 import messageRoutes from './routes/messages.js'
 import adminRoutes from './routes/admin.js'
+import vaultRoutes from './routes/vault.js'
 import { setIO } from './services/socketIO.js'
 import { gameEngine } from './services/gameEngine.js'
 import { start as mercyPotStart, getTotal as mercyPotGetTotal, flush as mercyPotFlush, addPresenceContribution as mercyPotAddPresence } from './services/mercyPotService.js'
 import { chatService } from './services/chatService.js'
 import { getIdleRatePer10s } from './utils/oracleLevels.js'
 import User from './models/User.js'
+import { getSscBalance } from './utils/sscBalance.js'
 import { ensureCollections } from './scripts/initDb.js'
 import { startScheduledCleanup } from './services/userCleanupService.js'
 
@@ -77,6 +79,7 @@ app.use('/api/support', supportRoutes)
 app.use('/api/achievements', achievementRoutes)
 app.use('/api/messages', messageRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/vault', vaultRoutes)
 
 // Production: serve frontend build and SPA fallback so /admin, /play, etc. work on direct load or refresh
 function findFrontendDist() {
@@ -204,6 +207,42 @@ function runMercyPotTick(io) {
   })
 }
 
+/** Master SSC clock: every 10s while user is on site (any page with presence + userId). Emits combined gold + balance. */
+async function runSiteSscIdleTick(io) {
+  const { SSC_PER_10S_SITE_IDLE } = await import('./config/sscConstants.js')
+  const byUser = new Map()
+  presenceBySocket.forEach((p, socketId) => {
+    if (!p.userId) return
+    if (!byUser.has(p.userId)) byUser.set(p.userId, [])
+    byUser.get(p.userId).push(socketId)
+  })
+  for (const [userId, socketIds] of byUser) {
+    try {
+      const user = await User.findById(userId)
+      if (!user) continue
+      if (user.sscBalance == null && user.metal != null) {
+        user.sscBalance = user.metal
+      }
+      const next = (user.sscBalance ?? user.metal ?? 0) + SSC_PER_10S_SITE_IDLE
+      user.sscBalance = next
+      await user.save()
+      const bal = getSscBalance(user)
+      const payload = {
+        gold: user.gold,
+        metal: bal,
+        sscBalance: bal,
+        user_ssc_balance: bal,
+      }
+      for (const sid of socketIds) {
+        const s = io.sockets.sockets.get(sid)
+        if (s) s.emit('oracle-idle-gold', payload)
+      }
+    } catch (e) {
+      console.warn('[siteSscIdle]', userId, e?.message)
+    }
+  }
+}
+
 // GDD 8.1: Oracle idle gold tick — only when socket connected and tab focused (uplink requirement)
 async function runOracleIdleTick(io) {
   const socketsByUser = new Map()
@@ -221,10 +260,7 @@ async function runOracleIdleTick(io) {
       const rate = getIdleRatePer10s(user.oracleLevel ?? 1)
       const newGold = (user.gold ?? 0) + rate
       await User.findByIdAndUpdate(userId, { $set: { gold: newGold } })
-      for (const sid of socketIds) {
-        const s = io.sockets.sockets.get(sid)
-        if (s) s.emit('oracle-idle-gold', { gold: newGold })
-      }
+      // Gold push to client happens in runSiteSscIdleTick (combined with SSC balance)
     } catch (e) {
       console.warn('[oracleIdle] tick failed for user', userId, e?.message)
     }
@@ -402,6 +438,7 @@ function startMercyPotTick(io) {
   mercyPotIntervalId = setInterval(() => {
     runMercyPotTick(io)
     runOracleIdleTick(io)
+    runSiteSscIdleTick(io)
   }, 10000)
 }
 

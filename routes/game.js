@@ -4,6 +4,8 @@ import { requireAuth } from '../middleware/auth.js'
 import { addAdContribution } from '../services/mercyPotService.js'
 import { checkAndUnlock } from '../services/achievementService.js'
 import { standardAdRewardByRank, emergencySiphonRewardByRank } from '../config/economy.js'
+import { SSC_VIDEO_AD_REWARD } from '../config/sscConstants.js'
+import { getSscBalance } from '../utils/sscBalance.js'
 
 const router = express.Router()
 
@@ -14,12 +16,32 @@ router.post('/siphon', requireAuth, async (req, res) => {
     const rank = user.rank ?? 0
     const emergency = req.body && req.body.emergency === true
     const amount = emergency ? emergencySiphonRewardByRank(rank) : standardAdRewardByRank(rank)
-    const currentGold = Number(user.gold) || 0
+    const full = await User.findById(user._id)
+    if (!full) return res.status(404).json({ error: 'User not found' })
+    const currentGold = Number(full.gold) || 0
     const newGold = currentGold + amount
-    await User.findByIdAndUpdate(user._id, { $set: { gold: newGold }, $inc: { adsWatched: 1 } })
+    const mult = full.propagandaFilter ? 2 : 1
+    const sscFromAd = SSC_VIDEO_AD_REWARD * mult
+    if (full.sscBalance == null && full.metal != null) full.sscBalance = full.metal
+    full.sscBalance = (full.sscBalance ?? 0) + sscFromAd
+    full.gold = newGold
+    full.adsWatched = (full.adsWatched ?? 0) + 1
+    await full.save()
+    const updated = full
     addAdContribution() // GDD 6: Rewarded Ad Watch +$0.0040 SSC to Holding Bucket
     const newAchievements = await checkAndUnlock(user._id.toString())
-    res.json({ gold: newGold, added: amount, newAchievements })
+    const bal = getSscBalance(updated)
+    res.json({
+      gold: newGold,
+      added: amount,
+      metal: bal,
+      sscBalance: bal,
+      user_ssc_balance: bal,
+      sscEarned: bal,
+      sscFromAd,
+      video_ad_complete: true,
+      newAchievements,
+    })
   } catch (error) {
     res.status(500).json({ error: error.message })
   }
@@ -33,9 +55,13 @@ router.get('/state/:userId', async (req, res) => {
       return res.status(404).json({ error: 'User not found' })
     }
     
+    const bal = getSscBalance(user)
     res.json({
       gold: user.gold,
-      metal: user.metal,
+      metal: bal,
+      sscBalance: bal,
+      user_ssc_balance: bal,
+      sscEarned: bal,
       rank: user.rank,
       xp: user.xp,
       wagerCap: user.wagerCap

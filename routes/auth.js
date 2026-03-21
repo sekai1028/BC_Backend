@@ -7,12 +7,13 @@ import User from '../models/User.js'
 import { sendVerificationEmail, sendLoginCodeEmail } from '../services/emailService.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getRankFromXP } from '../utils/rankFromXP.js'
+import { getSscBalance } from '../utils/sscBalance.js'
 
 const router = express.Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'bunker-dev-secret-change-in-production'
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
 
-function toClientUser(doc) {
+export function toClientUser(doc) {
   if (!doc) return null
   const totalRounds = doc.totalRounds ?? 0
   const roundsWon = doc.roundsWon ?? 0
@@ -20,6 +21,7 @@ function toClientUser(doc) {
   const totalMultiplierSum = doc.totalMultiplierSum ?? 0
   const winRate = totalRounds > 0 ? (roundsWon / totalRounds) * 100 : 0
   const avgMultiplier = roundsWon > 0 ? totalMultiplierSum / roundsWon : 0
+  const bal = getSscBalance(doc)
   return {
     id: doc._id.toString(),
     username: doc.username || doc.email?.split('@')[0] || 'Exile',
@@ -29,7 +31,13 @@ function toClientUser(doc) {
     totalWagered: doc.totalWagered ?? doc.xp ?? 0,
     verified: !!doc.verified,
     gold: doc.gold ?? 0,
-    metal: doc.metal ?? 0,
+    metal: bal,
+    sscBalance: bal,
+    user_ssc_balance: bal,
+    sscEarned: bal,
+    propagandaFilter: !!doc.propagandaFilter,
+    leaderboardBunkerTag: !!doc.leaderboardBunkerTag,
+    leaderboardGlowColor: doc.leaderboardGlowColor || '#00FF41',
     twoFactorEnabled: !!doc.twoFactorEnabled,
     totalRounds,
     bestStreak,
@@ -43,7 +51,8 @@ function toClientUser(doc) {
     oracleLevel: doc.oracleLevel ?? 1,
     metalMod: doc.metalMod ?? 0,
     oracleMod: doc.oracleMod ?? 0,
-    bannedFromChat: !!doc.bannedFromChat
+    bannedFromChat: !!doc.bannedFromChat,
+    vaultLegendUnlocked: !!doc.vaultLegendUnlocked
   }
 }
 
@@ -104,6 +113,7 @@ router.post('/register', async (req, res) => {
       totalWagered: migratedTotalWagered,
       gold: migratedGold,
       metal: 0,
+      sscBalance: 0,
       wagerCap: 2,  // GDD 8: Vault Level 1 default
       oracleLevel: 1,
       vaultLevel: 1,
@@ -264,6 +274,7 @@ router.post('/send-login-code', async (req, res) => {
         totalWagered: migratedTotalWagered,
         gold: migratedGold,
         metal: 0,
+        sscBalance: 0,
         wagerCap: 2,
         oracleLevel: 1,
         vaultLevel: 1,

@@ -38,6 +38,21 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  /** Single SSC wallet — idle + ads + shop; legacy `metal` merged on read if unset */
+  sscBalance: {
+    type: Number,
+    default: 0
+  },
+  /** @deprecated Lifetime counter — prefer sscBalance for display */
+  sscEarned: {
+    type: Number,
+    default: 0
+  },
+  /** Black Market: doubles video ad SSC grant */
+  propagandaFilter: { type: Boolean, default: false },
+  /** Black Market: leaderboard name outline glow */
+  leaderboardBunkerTag: { type: Boolean, default: false },
+  leaderboardGlowColor: { type: String, default: '#00FF41' },
   verified: {
     type: Boolean,
     default: false
@@ -118,7 +133,9 @@ const userSchema = new mongoose.Schema({
   currentConsecutiveMaxWager: { type: Number, default: 0 },
   mercyDonatedWithoutGold: { type: Number, default: 0 },
   recoveredTo1WithoutBuying: { type: Boolean, default: false },
-  sessionStartedAt: { type: Date, default: null }
+  sessionStartedAt: { type: Date, default: null },
+  /** Legendary Syndicate Slayer — completed Enter the Vault (SSC deposit + milestones) */
+  vaultLegendUnlocked: { type: Boolean, default: false }
 })
 
 export default mongoose.model('User', userSchema)

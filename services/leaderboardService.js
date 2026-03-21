@@ -72,17 +72,33 @@ export async function searchByDisplayName(query, sortBy = 'biggestExtract') {
   const field = SORT_FIELDS.includes(sortBy) ? sortBy : 'totalSiphoned'
   const regex = new RegExp(`^${escapeRegex(q)}$`, 'i')
   const matches = await LeaderboardEntry.find({ displayName: regex }).lean()
+  const userIds = matches.filter((e) => e.source === 'user' && e.userId).map((e) => e.userId)
+  const userMetaById = new Map()
+  if (userIds.length > 0) {
+    const users = await User.find({ _id: { $in: userIds } }).select('rank leaderboardBunkerTag leaderboardGlowColor').lean()
+    for (const u of users) {
+      userMetaById.set(u._id.toString(), {
+        exileRank: u.rank ?? 0,
+        leaderboardBunkerTag: !!u.leaderboardBunkerTag,
+        leaderboardGlowColor: u.leaderboardGlowColor || '#00FF41'
+      })
+    }
+  }
   const results = []
   for (const entry of matches) {
     const value = entry[field] ?? 0
     const above = await LeaderboardEntry.countDocuments({ [field]: { $gt: value } })
+    const meta = entry.source === 'user' && entry.userId ? userMetaById.get(entry.userId.toString()) : null
     results.push({
       rank: above + 1,
       displayName: entry.displayName,
       totalSiphoned: entry.totalSiphoned ?? 0,
       biggestExtract: entry.biggestExtract ?? 0,
       biggestLoss: entry.biggestLoss ?? 0,
-      source: entry.source
+      source: entry.source,
+      exileRank: meta ? meta.exileRank : null,
+      leaderboardBunkerTag: meta?.leaderboardBunkerTag ?? false,
+      leaderboardGlowColor: meta?.leaderboardGlowColor ?? null
     })
   }
   results.sort((a, b) => a.rank - b.rank || a.displayName.localeCompare(b.displayName))
@@ -207,12 +223,30 @@ export async function getTop(limit = 50, sortBy = 'totalSiphoned', page = 1) {
     .skip(skip)
     .limit(numLimit)
     .lean()
-  return entries.map((e, i) => ({
-    rank: skip + i + 1,
-    displayName: e.displayName,
-    totalSiphoned: e.totalSiphoned,
-    biggestExtract: e.biggestExtract,
-    biggestLoss: e.biggestLoss ?? 0,
-    source: e.source
-  }))
+  const userIds = entries.filter((e) => e.source === 'user' && e.userId).map((e) => e.userId)
+  const userMetaById = new Map()
+  if (userIds.length > 0) {
+    const users = await User.find({ _id: { $in: userIds } }).select('rank leaderboardBunkerTag leaderboardGlowColor').lean()
+    for (const u of users) {
+      userMetaById.set(u._id.toString(), {
+        exileRank: u.rank ?? 0,
+        leaderboardBunkerTag: !!u.leaderboardBunkerTag,
+        leaderboardGlowColor: u.leaderboardGlowColor || '#00FF41'
+      })
+    }
+  }
+  return entries.map((e, i) => {
+    const meta = e.source === 'user' && e.userId ? userMetaById.get(e.userId.toString()) : null
+    return {
+      rank: skip + i + 1,
+      displayName: e.displayName,
+      totalSiphoned: e.totalSiphoned,
+      biggestExtract: e.biggestExtract,
+      biggestLoss: e.biggestLoss ?? 0,
+      source: e.source,
+      exileRank: meta ? meta.exileRank : null,
+      leaderboardBunkerTag: meta?.leaderboardBunkerTag ?? false,
+      leaderboardGlowColor: meta?.leaderboardGlowColor ?? null
+    }
+  })
 }

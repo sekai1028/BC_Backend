@@ -7,6 +7,7 @@ import express from 'express'
 import Stripe from 'stripe'
 import User from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
+import { getSscBalance } from '../utils/sscBalance.js'
 
 const router = express.Router()
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
@@ -17,15 +18,29 @@ function getStripe() {
   return key ? new Stripe(key) : null
 }
 
-/** GDD 5.1 product table. type: consumable | permanent | hybrid. effect: { gold?, metalSpeed?, oracleSpeed? }. Metal items removed for v1 (v2.0 may add metal part idle production). */
+/** GDD 5.1 product table. effect: { gold?, metalSpeed?, oracleSpeed?, sscBonus?, propagandaFilter?, leaderboardBunkerTag?, leaderboardGlowColor? } */
 const PRODUCTS = [
   { id: 'emergency-signal', name: 'Emergency Signal', type: 'consumable', price: 0.99, effect: { gold: 40 } },
   { id: 'small-scrap-bag', name: 'Small Scrap Bag', type: 'consumable', price: 1.99, effect: { gold: 100 } },
   { id: 'medium-cache', name: 'Medium Cache', type: 'consumable', price: 3.99, effect: { gold: 250 } },
   { id: 'large-vault', name: 'Large Vault', type: 'consumable', price: 6.99, effect: { gold: 500 } },
   { id: 'syndicate-hoard', name: 'Syndicate Hoard', type: 'consumable', price: 11.99, effect: { gold: 1000 } },
+  { id: 'propaganda-filter', name: 'Propaganda Filter', type: 'permanent', price: 1.99, effect: { propagandaFilter: true } },
   { id: 'oracle-overclock', name: 'Oracle Overclock', type: 'permanent', price: 5.99, effect: { oracleSpeed: 1.0 } },
-  { id: 'bunker-starter-kit', name: 'Bunker Starter Kit', type: 'hybrid', price: 9.99, effect: { gold: 350, oracleSpeed: 1.0 } }
+  {
+    id: 'bunker-starter-kit',
+    name: 'Bunker Starter Kit',
+    type: 'hybrid',
+    price: 9.99,
+    effect: { gold: 350, oracleSpeed: 1.0, sscBonus: 0.1 }
+  },
+  {
+    id: 'leaderboard-bunker-tags',
+    name: 'Leaderboard Bunker Tags',
+    type: 'permanent',
+    price: 2.99,
+    effect: { leaderboardBunkerTag: true, leaderboardGlowColor: '#00FF41' }
+  }
 ]
 
 function getProduct(id) {
@@ -69,7 +84,22 @@ router.post('/checkout', requireAuth, async (req, res) => {
           unit_amount: Math.round(product.price * 100),
           product_data: {
             name: product.name,
-            description: product.type === 'consumable' ? `${product.effect.gold ?? 0} Gold` : (product.type === 'permanent' ? (product.effect.metalSpeed ? `+${product.effect.metalSpeed}x Metal Speed` : `+${product.effect.oracleSpeed ?? 0}x Passive Gold`) : 'Bundle')
+            description: (() => {
+              const e = product.effect || {}
+              if (product.type === 'consumable') return `${e.gold ?? 0} Gold`
+              if (product.id === 'propaganda-filter') return 'Doubles SSC from every video ad'
+              if (product.id === 'leaderboard-bunker-tags') return 'Glow outline on leaderboard name'
+              if (product.type === 'permanent') {
+                if (e.metalSpeed) return `+${e.metalSpeed}x Metal Speed`
+                if (e.oracleSpeed) return `+${e.oracleSpeed}x Passive Gold`
+                return 'Permanent unlock'
+              }
+              const parts = []
+              if (e.gold) parts.push(`${e.gold} Gold`)
+              if (e.oracleSpeed) parts.push(`+${e.oracleSpeed}x Passive Gold`)
+              if (e.sscBonus) parts.push(`+${e.sscBonus} SSC Residual Data`)
+              return parts.join(' · ') || 'Bundle'
+            })()
           }
         }
       }],
@@ -149,6 +179,19 @@ export async function fulfillPurchase(userId, productId) {
   if (product.effect.oracleSpeed != null) {
     const current = user.oracleMod ?? 0
     updates.oracleMod = Math.max(current, product.effect.oracleSpeed)
+  }
+  if (product.effect.sscBonus != null && product.effect.sscBonus > 0) {
+    const cur = getSscBalance(user)
+    const next = cur + product.effect.sscBonus
+    updates.sscBalance = next
+    updates.metal = next
+  }
+  if (product.effect.propagandaFilter) {
+    updates.propagandaFilter = true
+  }
+  if (product.effect.leaderboardBunkerTag) {
+    updates.leaderboardBunkerTag = true
+    updates.leaderboardGlowColor = product.effect.leaderboardGlowColor || '#00FF41'
   }
   if (Object.keys(updates).length) {
     await User.findByIdAndUpdate(userId, { $set: updates })

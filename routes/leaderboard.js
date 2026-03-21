@@ -76,8 +76,12 @@ router.get('/my-rank', async (req, res) => {
       if (user) {
         const result = await getRankByUserId(user._id, sort)
         const totalPlayers = await getTotalPlayers()
+        const tagFields = {
+          leaderboardBunkerTag: !!user.leaderboardBunkerTag,
+          leaderboardGlowColor: user.leaderboardGlowColor || '#00FF41'
+        }
         if (result) {
-          return res.json({ ...result, totalPlayers })
+          return res.json({ ...result, totalPlayers, ...tagFields })
         }
         // No user entry: try displayName fallback (e.g. they have a guest row with same name)
         const byName = await getEntryByDisplayName(user.username, sort)
@@ -88,7 +92,8 @@ router.get('/my-rank', async (req, res) => {
             biggestExtract: byName.biggestExtract,
             biggestLoss: 0,
             totalPlayers,
-            displayName: user.username
+            displayName: user.username,
+            ...tagFields
           })
         }
         const totalSiphoned = user.totalSiphoned ?? 0
@@ -99,7 +104,8 @@ router.get('/my-rank', async (req, res) => {
           biggestExtract: user.biggestExtract ?? 0,
           biggestLoss: 0,
           totalPlayers,
-          displayName: user.username
+          displayName: user.username,
+          ...tagFields
         })
       }
     }
