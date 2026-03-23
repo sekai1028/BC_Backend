@@ -5,6 +5,7 @@
 import express from 'express'
 import mongoose from 'mongoose'
 import User from '../models/User.js'
+import LeaderboardEntry from '../models/LeaderboardEntry.js'
 import { requireAdmin } from '../middleware/adminAuth.js'
 import { chatService } from '../services/chatService.js'
 import { getEconomyConfig, setEconomyConfig, invalidateEconomyCache } from '../config/economy.js'
@@ -68,6 +69,68 @@ router.get('/analytics', async (req, res) => {
       totalSecondsOnline,
       avgSessionMinutes: Math.round((avgSessionSeconds / 60) * 10) / 10,
       activeUsersLast7d: activeUsers
+    })
+  } catch (e) {
+    res.status(500).json({ message: e.message })
+  }
+})
+
+/**
+ * POST /api/admin/reset-player-score
+ * Clears game performance stats and removes the user's LeaderboardEntry (registered users).
+ * Does not change gold, SSC, vault, oracle, or achievements unless resetRankProgress is true.
+ * Body: { userId: string, resetRankProgress?: boolean }
+ */
+router.post('/reset-player-score', async (req, res) => {
+  try {
+    const { userId, resetRankProgress = false } = req.body || {}
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: 'valid userId required' })
+    }
+    const oid = new mongoose.Types.ObjectId(userId)
+
+    await LeaderboardEntry.deleteMany({ source: 'user', userId: oid })
+
+    const statsReset = {
+      totalRounds: 0,
+      roundsWon: 0,
+      bestStreak: 0,
+      currentStreak: 0,
+      totalMultiplierSum: 0,
+      totalSiphoned: 0,
+      biggestExtract: 0,
+      adsWatched: 0,
+      timesCrashed: 0,
+      timesBankrupt: 0,
+      maxMultiplierReached: 1,
+      totalSecondsOnline: 0,
+      bestConsecutiveMaxWager: 0,
+      currentConsecutiveMaxWager: 0,
+      mercyDonatedWithoutGold: 0,
+      recoveredTo1WithoutBuying: false,
+    }
+    const rankReset = resetRankProgress
+      ? { rank: 0, xp: 0, totalWagered: 0 }
+      : {}
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { $set: { ...statsReset, ...rankReset } },
+      { new: true }
+    )
+    if (!user) return res.status(404).json({ message: 'User not found' })
+
+    res.json({
+      ok: true,
+      userId: user._id.toString(),
+      resetRankProgress: !!resetRankProgress,
+      stats: statsReset,
+      rank: user.rank,
+      xp: user.xp,
+      totalWagered: user.totalWagered,
+      totalRounds: user.totalRounds,
+      totalSiphoned: user.totalSiphoned,
+      biggestExtract: user.biggestExtract,
     })
   } catch (e) {
     res.status(500).json({ message: e.message })
@@ -196,8 +259,9 @@ router.post('/ban-chat', async (req, res) => {
 router.get('/users', async (req, res) => {
   try {
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
-    const page = Math.max(1, Number(req.query.page) || 1)
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 25))
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1)
+    const rawSize = parseInt(String(req.query.pageSize ?? '25'), 10)
+    const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 25))
     const skip = (page - 1) * pageSize
 
     let mongoQuery = {}
@@ -218,7 +282,7 @@ router.get('/users', async (req, res) => {
 
     const total = await User.countDocuments(mongoQuery)
     const list = await User.find(mongoQuery)
-      .select('username email gold rank totalSiphoned bannedFromChat createdAt')
+      .select('username email gold rank totalSiphoned totalRounds bannedFromChat createdAt')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(pageSize)
@@ -236,12 +300,14 @@ router.get('/users', async (req, res) => {
   }
 })
 
-/** GET /api/admin/chat/messages — recent Global Chat for moderation */
+/** GET /api/admin/chat/messages — Global Chat for moderation (paginated, newest first on page 1) */
 router.get('/chat/messages', async (req, res) => {
   try {
-    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100))
-    const messages = await chatService.getRecentMessages(limit)
-    res.json({ messages })
+    const page = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1)
+    const rawSize = parseInt(String(req.query.pageSize ?? '10'), 10)
+    const pageSize = Math.min(100, Math.max(1, Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 10))
+    const data = await chatService.getRecentMessagesPaged(page, pageSize)
+    res.json(data)
   } catch (e) {
     res.status(500).json({ message: e.message })
   }

@@ -20,6 +20,16 @@ const TIER_1 = [
   "WASTELAND: Recovered 'Crypto' wallet. Balance: 0.00. Status: Historically accurate.",
   "SYNDICATE_MSG: Friendly reminder: Your 'optional' donation to Vector-Dayton is still optional. (It is not optional.)",
   "RECOVERY: Found a 'Santa Claus' suit. Oracle assumes this was the Syndicate CEO's winter combat gear.",
+  "BUNKER_GOSSIP: Old-timers swear the Mercy Pot once paid out in actual mercy. No receipts found.",
+  "WASTELAND: Excavated 'streaming subscription' stack. Oracle: peak-era anxiety as a service.",
+  "ORACLE: Fun fact: Your wager history is 12% more interesting than the average exile. Ego buffer +1.",
+  "SYNDICATE_MSG: Smile for the uplink. Morale is tracked. Frowning may affect your tier.",
+  "ARCHAEOLOGY: 'Influencer' plaque unearthed. Inscription reads: thoughts and prayers, LLC.",
+  "RECOVERY: Plastic straw labeled 'sustainable.' Oracle filed it under comedy and tragedy.",
+  "WASTELAND: Rusted sign: FREE WIFI. Password still unknown. Hope endures.",
+  "BUNKER_GOSSIP: They say the Director drinks coolant. Oracle says: statistically plausible.",
+  "ORACLE: Telemetry shows you blinked aggressively. Logging as 'defensive optimism.'",
+  "SYNDICATE_MSG: Team-building exercise canceled. You are already building enough for everyone.",
 ]
 
 /** Tier 2: Caution (50–85%) — Build paranoia. Technical + Resistance. */
@@ -37,6 +47,16 @@ const TIER_2 = [
   "RESISTANCE: Bunker heat rising. Syndicate trace may be imminent.",
   "SIGNAL_STRESS: Proximity alert. Unknown signature approaching your sector.",
   "TECH: Flickering detected. Either a hardware glitch or something worse.",
+  "RESISTANCE: Ghost packets on the wire. Someone else is folding in your echo.",
+  "TECH: Latency spike correlates with Syndicate heartbeat. Not a coincidence.",
+  "SYNDICATE_MSG: Pattern match: your run resembles 847 prior liquidations. Smile anyway.",
+  "SIGNAL_STRESS: Oracle cooling loop engaged. It does not do this for fun.",
+  "RESISTANCE: Chatter on dead channels. Either interference or a warning.",
+  "TECH: Checksum drift on round state. The Consensus is hesitating.",
+  "SYNDICATE_MSG: Asset temperature rising. Compliance suggests you notice.",
+  "RESISTANCE: Bunker net flinched. Something heavy just stepped on the line.",
+  "SIGNAL_STRESS: Harmonics in the multiplier feed. Endgame harmonics, maybe.",
+  "TECH: Redundant paths failing in sequence. That is how cascades start.",
 ]
 
 /** Tier 3: Critical (85–90%) — Signal the end. Syndicate Liquidation + Technical Critical. */
@@ -51,6 +71,14 @@ const TIER_3 = [
   "WARNING: Security sweep detected. Fold or be folded.",
   "ALERT: Uplink compromise in progress. Countdown to zero: unknown.",
   "SYNDICATE_MSG: Congratulations. You have been selected for Mandatory Wealth Redistribution. (You are the donor.)",
+  "MARGIN_CALL: Final courtesy ping. The Syndicate does not send second notices.",
+  "LIQUIDATION_PROTOCOL: Collateral narrative updated. You are now 'temporarily archived.'",
+  "ORACLE_PANIC: Confidence interval collapsed. The Oracle recommends legs and a fold.",
+  "CRITICAL: Trace lock at 94%. Holding is a statement. So is folding.",
+  "VAULT_SEIZURE: Escrow rerouted. Your gold just took a mandatory field trip.",
+  "WARNING: Sweep ETA measured in heartbeats. Count yours.",
+  "SYNDICATE_MSG: Thank you for participating in volatility. Invoice attached.",
+  "TECH: Kernel panic deferred. It will catch up. So will they.",
 ]
 
 /** Tier 4: Anomaly (random) — Chaos, 4th wall, pattern breaker. */
@@ -65,6 +93,15 @@ const TIER_4 = [
   "SYNDICATE_MSG: Unauthorized hope detected in Sector 7. Please report for a reality check.",
   "ORACLE: The Oracle has calculated the meaning of life. It is not sharing.",
   "ANOMALY: If you are reading this, the run has already ended. Or has it?",
+  "ERROR_418: You are a teapot. The Syndicate still expects a pour.",
+  "ANOMALY: The chart smiled back. The Oracle denies teaching it that.",
+  "ORACLE: I flipped a bit for you. It landed on 'consequences.'",
+  "SYNDICATE_MSG: This headline is aware you muted the tab. It resents you.",
+  "ERROR_LOOP: Stack overflow in destiny. Please fold recursively.",
+  "ANOMALY: Your reflection in the screen blinked first.",
+  "ORACLE: Simulation hypothesis updated to 'probably.' Enjoy.",
+  "ERROR_303: See other timelines. All of them folded.",
+  "ANOMALY: The Mercy Pot winked. Physics filed a complaint.",
 ]
 
 function pickRandom(arr) {

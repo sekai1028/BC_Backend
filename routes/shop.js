@@ -8,6 +8,9 @@ import Stripe from 'stripe'
 import User from '../models/User.js'
 import { requireAuth } from '../middleware/auth.js'
 import { getSscBalance } from '../utils/sscBalance.js'
+import { getIO } from '../services/socketIO.js'
+import { chatService } from '../services/chatService.js'
+import { addImmediateContribution } from '../services/mercyPotService.js'
 
 const router = express.Router()
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
@@ -40,6 +43,15 @@ const PRODUCTS = [
     type: 'permanent',
     price: 2.99,
     effect: { leaderboardBunkerTag: true, leaderboardGlowColor: '#00FF41' }
+  },
+  /** Black Market — thank-you / community pot (no in-game currency grant to buyer) */
+  { id: 'tip-architect', name: 'Tip The Architect', type: 'consumable', price: 1.99, effect: { tipArchitect: true } },
+  {
+    id: 'mercy-pot-donation-1ssc',
+    name: 'Donate 1.0 SSC to the Mercy Pot',
+    type: 'consumable',
+    price: 1.0,
+    effect: { mercyPotSsc: 1.0 }
   }
 ]
 
@@ -86,7 +98,10 @@ router.post('/checkout', requireAuth, async (req, res) => {
             name: product.name,
             description: (() => {
               const e = product.effect || {}
-              if (product.type === 'consumable') return `${e.gold ?? 0} Gold`
+              if (product.id === 'tip-architect') return 'Thank-you tip — supports development'
+              if (product.id === 'mercy-pot-donation-1ssc') return '+1.0 SSC to the SSC Global Mercy Pot'
+              if (product.type === 'consumable' && e.gold != null && e.gold > 0) return `${e.gold} Gold`
+              if (product.type === 'consumable') return 'Black Market purchase'
               if (product.id === 'propaganda-filter') return 'Doubles SSC from every video ad'
               if (product.id === 'leaderboard-bunker-tags') return 'Glow outline on leaderboard name'
               if (product.type === 'permanent') {
@@ -159,6 +174,11 @@ router.post('/redeem', requireAuth, async (req, res) => {
   res.json({ message: 'Coupon applied', user: toClient(updated) })
 })
 
+function shopDisplayName(user) {
+  const raw = (user?.username || user?.email?.split('@')[0] || 'Exile').toString().trim() || 'Exile'
+  return raw.length > 36 ? `${raw.slice(0, 33)}...` : raw
+}
+
 /**
  * Fulfill a purchase: apply consumable gold and/or permanent mods (best-in-slot).
  * GDD 5.1: Permanent boosts do not stack — only the highest owned applies.
@@ -169,32 +189,55 @@ export async function fulfillPurchase(userId, productId) {
   const user = await User.findById(userId)
   if (!user) return
   const updates = {}
-  if (product.effect.gold != null && product.effect.gold > 0) {
-    updates.gold = (user.gold ?? 0) + product.effect.gold
+  const e = product.effect || {}
+  if (e.gold != null && e.gold > 0) {
+    updates.gold = (user.gold ?? 0) + e.gold
   }
-  if (product.effect.metalSpeed != null) {
+  if (e.metalSpeed != null) {
     const current = user.metalMod ?? 0
-    updates.metalMod = Math.max(current, product.effect.metalSpeed)
+    updates.metalMod = Math.max(current, e.metalSpeed)
   }
-  if (product.effect.oracleSpeed != null) {
+  if (e.oracleSpeed != null) {
     const current = user.oracleMod ?? 0
-    updates.oracleMod = Math.max(current, product.effect.oracleSpeed)
+    updates.oracleMod = Math.max(current, e.oracleSpeed)
   }
-  if (product.effect.sscBonus != null && product.effect.sscBonus > 0) {
+  if (e.sscBonus != null && e.sscBonus > 0) {
     const cur = getSscBalance(user)
-    const next = cur + product.effect.sscBonus
+    const next = cur + e.sscBonus
     updates.sscBalance = next
     updates.metal = next
   }
-  if (product.effect.propagandaFilter) {
+  if (e.propagandaFilter) {
     updates.propagandaFilter = true
   }
-  if (product.effect.leaderboardBunkerTag) {
+  if (e.leaderboardBunkerTag) {
     updates.leaderboardBunkerTag = true
-    updates.leaderboardGlowColor = product.effect.leaderboardGlowColor || '#00FF41'
+    updates.leaderboardGlowColor = e.leaderboardGlowColor || '#00FF41'
+  }
+  if (e.mercyPotSsc != null && Number(e.mercyPotSsc) > 0) {
+    await addImmediateContribution(Number(e.mercyPotSsc), 0)
   }
   if (Object.keys(updates).length) {
     await User.findByIdAndUpdate(userId, { $set: updates })
+  }
+
+  const name = shopDisplayName(user)
+  let announce = ''
+  if (productId === 'mercy-pot-donation-1ssc' && e.mercyPotSsc != null) {
+    const amt = Number(e.mercyPotSsc)
+    const label = Number.isFinite(amt) ? amt.toFixed(1) : '1.0'
+    announce = `${name} has donated ${label} SSC to the Mercy Pot.`
+  } else if (productId === 'tip-architect' && e.tipArchitect) {
+    announce = `${name} tipped The Architect ($1.99).`
+  }
+  if (announce) {
+    try {
+      const formatted = await chatService.broadcastOracleAnnouncement(announce)
+      const io = getIO()
+      if (formatted && io) io.emit('chat-message', formatted)
+    } catch (err) {
+      console.error('[shop] Oracle chat announcement failed', err.message)
+    }
   }
 }
 

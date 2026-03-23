@@ -73,7 +73,7 @@ const userSchema = new mongoose.Schema({
   },
   oracleLevel: {
     type: Number,
-    default: 1
+    default: 0
   },
   vaultLevel: {
     type: Number,

@@ -32,7 +32,7 @@ function toClientUser(doc) {
     oracleMod: doc.oracleMod ?? 0,
     wagerCap: doc.wagerCap ?? getVaultConfig(doc.vaultLevel ?? 1).wagerCap,
     vaultLevel: doc.vaultLevel ?? 1,
-    oracleLevel: doc.oracleLevel ?? 1,
+    oracleLevel: doc.oracleLevel ?? 0,
     vaultLegendUnlocked: !!doc.vaultLegendUnlocked
   }
 }
@@ -70,22 +70,21 @@ router.post('/oracle-upgrade', requireAuth, async (req, res) => {
   try {
     const user = await User.findById(req.user._id)
     if (!user) return res.status(404).json({ message: 'User not found' })
-    const currentLevel = Math.max(1, Math.min(10, user.oracleLevel ?? 1))
+    const currentLevel = Math.max(0, Math.min(10, Math.floor(user.oracleLevel ?? 0)))
     if (currentLevel >= 10) {
       return res.status(400).json({ message: 'Oracle already at max level' })
     }
-    const nextLevel = currentLevel + 1
-    const nextConfig = ORACLE_LEVELS[nextLevel - 1]
-    const costGold = nextConfig?.upgradeGold ?? 0
-    if (costGold <= 0) {
+    const row = ORACLE_LEVELS[currentLevel]
+    if (!row || row.upgradeGold == null) {
       return res.status(400).json({ message: 'Oracle upgrade not available' })
     }
+    const costGold = row.upgradeGold
     const gold = user.gold ?? 0
     if (gold < costGold) {
       return res.status(400).json({ message: `Need ${costGold} Gold. You have ${gold.toFixed(0)}.` })
     }
     user.gold = gold - costGold
-    user.oracleLevel = nextLevel
+    user.oracleLevel = currentLevel + 1
     await user.save({ validateBeforeSave: false })
     res.json({ message: 'Oracle upgraded', user: toClientUser(user) })
   } catch (err) {

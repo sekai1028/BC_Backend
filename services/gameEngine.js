@@ -2,6 +2,7 @@ import { getRankFromXP } from '../utils/rankFromXP.js'
 import { addContribution as mercyPotAdd } from './mercyPotService.js'
 import { checkAndUnlock } from './achievementService.js'
 import { getCeiling, getFloor } from '../utils/oracleLevels.js'
+import { announceRankUp, announceGodRun } from './heroChatAnnouncements.js'
 import { getHeadlineForTier } from '../config/headlinePools.js'
 import { SSC_PER_SECOND_ROUND } from '../config/sscConstants.js'
 import { getSscBalance } from '../utils/sscBalance.js'
@@ -48,10 +49,16 @@ class GameEngine {
       if (wager > userGold) throw new Error('Invalid wager: insufficient gold or zero')
       user.gold = userGold - wager
       // GDD 2.8: 1 Gold wagered = 1 XP; update rank
+      const prevRank = user.rank ?? 0
       user.totalWagered = (user.totalWagered || 0) + wager
       user.xp = user.totalWagered
       user.rank = getRankFromXP(user.xp)
       await user.save()
+      if (user.rank > prevRank) {
+        announceRankUp(user._id, user.username, user.rank, prevRank).catch((e) =>
+          console.warn('[gameEngine] hero rank announcement failed:', e?.message)
+        )
+      }
       goldAfterHold = user.gold
     } else {
       const guestGold = Number.isFinite(clientGold) && clientGold >= 0 ? clientGold : defaultGuestGold
@@ -103,7 +110,8 @@ class GameEngine {
     const Round = (await import('../models/Round.js')).default
     const User = (await import('../models/User.js')).default
     const user = userId ? await User.findById(userId) : null
-    const userLevel = user?.oracleLevel ?? 1
+    // GDD 8: chart volatility — Level 0 uses Level 1 curve; passive gold is separate (server tick)
+    const userLevel = Math.max(1, user?.oracleLevel ?? 0)
     const existing = this.activeRounds.get(GLOBAL_ROUND_ID)
     if (existing && existing.intervalId != null) {
       const roundDoc = await Round.create({
@@ -579,6 +587,11 @@ class GameEngine {
           goldAfterFold = user.gold
           metalAfterFold = getSscBalance(user)
           sscEarnedTotal = getSscBalance(user)
+          if (finalMultiplier >= 20) {
+            announceGodRun(user._id, user.username, finalMultiplier).catch((e) =>
+              console.warn('[gameEngine] hero god run announcement failed:', e?.message)
+            )
+          }
           const tr = user.totalRounds || 0
           const rw = user.roundsWon || 0
           stats = {
@@ -676,6 +689,11 @@ class GameEngine {
           goldAfterFold = user.gold
           metalAfterFold = getSscBalance(user)
           sscEarnedTotal = getSscBalance(user)
+          if (finalMultiplier >= 20) {
+            announceGodRun(user._id, user.username, finalMultiplier).catch((e) =>
+              console.warn('[gameEngine] hero god run announcement failed:', e?.message)
+            )
+          }
           const tr = user.totalRounds || 0
           const rw = user.roundsWon || 0
           stats = {

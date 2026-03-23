@@ -14,7 +14,7 @@ const router = express.Router()
 function eligibilityPayload(userDoc) {
   const ssc = getSscBalance(userDoc)
   const wager = userDoc.totalWagered ?? userDoc.xp ?? 0
-  const oracle = userDoc.oracleLevel ?? 1
+  const oracle = userDoc.oracleLevel ?? 0
   return {
     vaultLegendUnlocked: !!userDoc.vaultLegendUnlocked,
     checks: {
@@ -63,7 +63,7 @@ router.post('/authenticate', requireAuth, async (req, res) => {
     }
 
     const wager = user.totalWagered ?? user.xp ?? 0
-    const oracle = user.oracleLevel ?? 1
+    const oracle = user.oracleLevel ?? 0
     const bal = getSscBalance(user)
 
     if (bal < VAULT_LEGEND_MIN_SSC) {

@@ -8,6 +8,7 @@ import { sendVerificationEmail, sendLoginCodeEmail } from '../services/emailServ
 import { requireAuth } from '../middleware/auth.js'
 import { getRankFromXP } from '../utils/rankFromXP.js'
 import { getSscBalance } from '../utils/sscBalance.js'
+import { announceNewExile } from '../services/heroChatAnnouncements.js'
 
 const router = express.Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'bunker-dev-secret-change-in-production'
@@ -48,7 +49,7 @@ export function toClientUser(doc) {
     achievements: Array.isArray(doc.achievements) ? doc.achievements : [],
     wagerCap: doc.wagerCap ?? 1,
     vaultLevel: doc.vaultLevel ?? 1,
-    oracleLevel: doc.oracleLevel ?? 1,
+    oracleLevel: doc.oracleLevel ?? 0,
     metalMod: doc.metalMod ?? 0,
     oracleMod: doc.oracleMod ?? 0,
     bannedFromChat: !!doc.bannedFromChat,
@@ -115,7 +116,7 @@ router.post('/register', async (req, res) => {
       metal: 0,
       sscBalance: 0,
       wagerCap: 2,  // GDD 8: Vault Level 1 default
-      oracleLevel: 1,
+      oracleLevel: 0,
       vaultLevel: 1,
       totalSiphoned: 0,
       biggestExtract: 0,
@@ -144,6 +145,7 @@ router.post('/register', async (req, res) => {
     }
 
     console.log('[auth] register success', { userId: user._id.toString(), username: u, email: e, emailSent: true })
+    announceNewExile(u).catch((err) => console.warn('[auth] hero new exile announcement failed', err?.message))
     res.status(201).json({
       message: 'Registration successful. Please check your email to verify your account.',
       user: toClientUser(user),
@@ -276,7 +278,7 @@ router.post('/send-login-code', async (req, res) => {
         metal: 0,
         sscBalance: 0,
         wagerCap: 2,
-        oracleLevel: 1,
+        oracleLevel: 0,
         vaultLevel: 1,
         totalSiphoned: 0,
         biggestExtract: 0,

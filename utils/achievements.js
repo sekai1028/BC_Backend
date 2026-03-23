@@ -46,7 +46,7 @@ export function checkAchievementCriteria(user) {
   const timesBankrupt = Number(user.timesBankrupt) || 0
   const rank = Number(user.rank) || 0
   const gold = Number(user.gold) || 0
-  const oracleLevel = (Number(user.oracleLevel) || 1) + (Number(user.oracleMod) || 0)
+  const oracleLevel = (Number(user.oracleLevel) || 0) + (Number(user.oracleMod) || 0)
   const totalSiphoned = Number(user.totalSiphoned) || 0
   const bestMaxWager = Number(user.bestConsecutiveMaxWager) || 0
   const totalSeconds = Number(user.totalSecondsOnline) || 0

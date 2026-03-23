@@ -61,6 +61,12 @@ const io = new Server(httpServer, {
 })
 app.set('io', io)
 
+/**
+ * Single timer: Mercy Pot bucket flush + Oracle passive gold + site SSC idle.
+ * Default 10s. Under heavy load (1k+ players), set SITE_ECONOMY_TICK_MS=30000 — clients interpolate HUD between ticks.
+ */
+const SITE_ECONOMY_TICK_MS = Math.max(5000, Number(process.env.SITE_ECONOMY_TICK_MS) || 10000)
+
 // Middleware
 app.use(cors())
 // Stripe webhook needs raw body for signature verification (GDD 5.0)
@@ -147,6 +153,7 @@ function stopIdleBroadcast() {
 }
 
 // GDD 6.1: Presence for Mercy Pot — page: terminal|bunker, terminalActive (in round), bunkerFocused (tab focus)
+// bannerAdsServing: client verified display banner ad serving; site idle SSC accrual requires true
 const presenceBySocket = new Map()
 
 /** Same metric as Mercy Pot `signalsDetected`: terminal/bunker presence rows, else raw client count. */
@@ -185,7 +192,7 @@ function maybeEmitIntensityAlert(io, level) {
   }
   const text = messages[level]
   if (text) {
-    io.emit('chat-message', { id: 'intensity-' + now, username: 'Oracle', text, isSystem: true, time: 'now', rank: 0 })
+    io.emit('chat-message', { id: 'intensity-' + now, username: 'ORACLE', text, isSystem: true, time: 'now', rank: 0 })
     intensityAlertCooldown[level] = now
   }
   lastIntensityLevel = level
@@ -199,8 +206,9 @@ function runMercyPotTick(io) {
     if (p.page === 'bunker' && p.bunkerFocused) bunkerIdleCount++
   })
   const signalsDetected = getSignalsDetected(io)
-  mercyPotAddPresence(terminalActiveCount, bunkerIdleCount)
-  mercyPotFlush(signalsDetected).then(() => {
+  const tickScale = SITE_ECONOMY_TICK_MS / 10000
+  mercyPotAddPresence(terminalActiveCount, bunkerIdleCount, tickScale)
+  mercyPotFlush(signalsDetected, SITE_ECONOMY_TICK_MS / 1000).then(() => {
     const level = getIntensityLevel(signalsDetected)
     maybeEmitIntensityAlert(io, level)
     lastIntensityLevel = level
@@ -210,6 +218,8 @@ function runMercyPotTick(io) {
 /** Master SSC clock: every 10s while user is on site (any page with presence + userId). Emits combined gold + balance. */
 async function runSiteSscIdleTick(io) {
   const { SSC_PER_10S_SITE_IDLE } = await import('./config/sscConstants.js')
+  const tickScale = SITE_ECONOMY_TICK_MS / 10000
+  const sscIncrement = SSC_PER_10S_SITE_IDLE * tickScale
   const byUser = new Map()
   presenceBySocket.forEach((p, socketId) => {
     if (!p.userId) return
@@ -223,12 +233,17 @@ async function runSiteSscIdleTick(io) {
       if (user.sscBalance == null && user.metal != null) {
         user.sscBalance = user.metal
       }
-      const next = (user.sscBalance ?? user.metal ?? 0) + SSC_PER_10S_SITE_IDLE
-      user.sscBalance = next
-      await user.save()
-      const bal = getSscBalance(user)
+      const anyBannerServing = socketIds.some((sid) => presenceBySocket.get(sid)?.bannerAdsServing === true)
+      if (anyBannerServing) {
+        const next = (user.sscBalance ?? user.metal ?? 0) + sscIncrement
+        user.sscBalance = next
+        await user.save()
+      }
+      const fresh = await User.findById(userId)
+      if (!fresh) continue
+      const bal = getSscBalance(fresh)
       const payload = {
-        gold: user.gold,
+        gold: fresh.gold,
         metal: bal,
         sscBalance: bal,
         user_ssc_balance: bal,
@@ -245,6 +260,7 @@ async function runSiteSscIdleTick(io) {
 
 // GDD 8.1: Oracle idle gold tick — only when socket connected and tab focused (uplink requirement)
 async function runOracleIdleTick(io) {
+  const tickScale = SITE_ECONOMY_TICK_MS / 10000
   const socketsByUser = new Map()
   presenceBySocket.forEach((p, socketId) => {
     if (!p.userId) return
@@ -257,7 +273,10 @@ async function runOracleIdleTick(io) {
     try {
       const user = await User.findById(userId)
       if (!user) continue
-      const rate = getIdleRatePer10s(user.oracleLevel ?? 1)
+      const base = Math.floor(Number(user.oracleLevel) || 0)
+      if (base < 1) continue
+      const effective = Math.min(10, base + (Number(user.oracleMod) || 0))
+      const rate = getIdleRatePer10s(effective) * tickScale
       const newGold = (user.gold ?? 0) + rate
       await User.findByIdAndUpdate(userId, { $set: { gold: newGold } })
       // Gold push to client happens in runSiteSscIdleTick (combined with SSC balance)
@@ -283,7 +302,8 @@ io.on('connection', async (socket) => {
     const terminalActive = !!data?.terminalActive
     const bunkerFocused = data?.bunkerFocused !== false && page === 'bunker'
     const userId = data?.userId && typeof data.userId === 'string' ? data.userId : null
-    presenceBySocket.set(socket.id, { page, terminalActive, bunkerFocused, userId })
+    const bannerAdsServing = data?.bannerAdsServing === true
+    presenceBySocket.set(socket.id, { page, terminalActive, bunkerFocused, userId, bannerAdsServing })
     socket.join(page)
     broadcastOnlineCount()
   })
@@ -439,7 +459,7 @@ function startMercyPotTick(io) {
     runMercyPotTick(io)
     runOracleIdleTick(io)
     runSiteSscIdleTick(io)
-  }, 10000)
+  }, SITE_ECONOMY_TICK_MS)
 }
 
 // Connect to MongoDB and start server
@@ -468,6 +488,7 @@ async function start() {
   startScheduledCleanup({ initialDelayMs: 60 * 1000 })
   httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)
+    console.log(`Site economy tick (Mercy Pot + Oracle idle + SSC idle): every ${SITE_ECONOMY_TICK_MS}ms`)
     startIdleBroadcast(io)
     mercyPotStart(io)
     startMercyPotTick(io)

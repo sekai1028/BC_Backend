@@ -1,4 +1,8 @@
-/** GDD 6: Holding Bucket — micro-contributions batched every 10s. SSC (Syndicate Siphon Credits). */
+/**
+ * GDD 6: Holding bucket — micro-contributions batched on the server economy interval
+ * (see `SITE_ECONOMY_TICK_MS` in server.js, default 10s). SSC (Syndicate Siphon Credits).
+ * Clients use `mercy-pot-update.velocity` + requestAnimationFrame to roll the display between flushes.
+ */
 const bucket = []
 let _io = null
 
@@ -11,12 +15,16 @@ export function addAdContribution() {
   bucket.push(0.004)
 }
 
-/** GDD 6: Terminal +$0.0001/10s per active, Bunker +$0.0001/20s per focused → per 10s: terminal*0.0001, bunker*0.00005 */
-export function addPresenceContribution(terminalActiveCount, bunkerIdleCount) {
+/**
+ * GDD 6: Terminal +$0.0001/10s per active, Bunker +$0.0001/20s per focused → per 10s: terminal*0.0001, bunker*0.00005
+ * @param {number} [intervalScale=1] — multiply when economy tick ≠ 10s (e.g. SITE_ECONOMY_TICK_MS / 10000)
+ */
+export function addPresenceContribution(terminalActiveCount, bunkerIdleCount, intervalScale = 1) {
+  const scale = Number(intervalScale) > 0 ? intervalScale : 1
   const t = Math.max(0, Number(terminalActiveCount) || 0)
   const b = Math.max(0, Number(bunkerIdleCount) || 0)
-  if (t > 0) bucket.push(t * 0.0001)
-  if (b > 0) bucket.push(b * 0.00005)
+  if (t > 0) bucket.push(t * 0.0001 * scale)
+  if (b > 0) bucket.push(b * 0.00005 * scale)
 }
 
 export function start(io) {
@@ -52,11 +60,16 @@ export async function setTotalAdmin(newTotal, io) {
   }
 }
 
-/** Flush bucket to DB and broadcast. GDD 6: New_Total + Global_Velocity (SSC/sec). Call every 10s with signalsDetected. */
-export async function flush(signalsDetected = 0) {
+/**
+ * Flush bucket to DB and broadcast. GDD 6: New_Total + Global_Velocity (SSC/sec).
+ * @param {number} [signalsDetected=0]
+ * @param {number} [bucketWindowSeconds=10] — must match server economy interval (e.g. SITE_ECONOMY_TICK_MS / 1000)
+ */
+export async function flush(signalsDetected = 0, bucketWindowSeconds = 10) {
   const sum = bucket.length > 0 ? bucket.reduce((a, b) => a + b, 0) : 0
   bucket.length = 0
-  const velocity = sum / 10 // SSC per second
+  const winSec = Math.max(0.001, Number(bucketWindowSeconds) || 10)
+  const velocity = sum / winSec // SSC per second over this bucket window
   try {
     const MercyPot = (await import('../models/MercyPot.js')).default
     const pot = await MercyPot.getInstance()
@@ -67,5 +80,34 @@ export async function flush(signalsDetected = 0) {
     if (_io) _io.emit('mercy-pot-update', { total: pot.total, velocity, signalsDetected })
   } catch (e) {
     console.warn('[mercyPotService] flush failed:', e?.message)
+  }
+}
+
+/**
+ * Black Market: paid donation to global pot — apply immediately (not the 10s presence bucket).
+ * @param {number} amount SSC to add (e.g. 1.0)
+ * @param {number} [signalsDetected=0] optional, passed through to clients
+ */
+export async function addImmediateContribution(amount, signalsDetected = 0) {
+  const a = Math.max(0, Number(amount) || 0)
+  if (a <= 0) return null
+  try {
+    const MercyPot = (await import('../models/MercyPot.js')).default
+    const pot = await MercyPot.getInstance()
+    pot.total = (pot.total || 0) + a
+    pot.lastUpdated = new Date()
+    await pot.save()
+    const sig = Number.isFinite(signalsDetected) ? signalsDetected : 0
+    if (_io) {
+      _io.emit('mercy-pot-update', {
+        total: pot.total,
+        velocity: pot.velocity ?? 0,
+        signalsDetected: sig
+      })
+    }
+    return pot
+  } catch (e) {
+    console.warn('[mercyPotService] addImmediateContribution failed:', e?.message)
+    return null
   }
 }

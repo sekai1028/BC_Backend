@@ -14,6 +14,49 @@ class ChatService {
     return text
   }
 
+  /** GDD 3.3 hero announcements — username ORACLE; shop purchases use broadcastOracleAnnouncement (AI Oracle). */
+  async broadcastHeroAnnouncement(messageText) {
+    const text = typeof messageText === 'string' ? messageText.trim().slice(0, MAX_CHAT_LEN) : ''
+    if (!text) return null
+    const chatMessage = await ChatMessage.create({
+      username: 'ORACLE',
+      rank: 0,
+      message: text,
+      standing: 0,
+      isSystem: true
+    })
+    return this.formatMessage({
+      _id: chatMessage._id,
+      userId: null,
+      username: 'ORACLE',
+      rank: 0,
+      message: text,
+      isSystem: true,
+      createdAt: chatMessage.createdAt
+    })
+  }
+
+  async broadcastOracleAnnouncement(messageText) {
+    const text = typeof messageText === 'string' ? messageText.trim().slice(0, MAX_CHAT_LEN) : ''
+    if (!text) return null
+    const chatMessage = await ChatMessage.create({
+      username: 'AI Oracle',
+      rank: 0,
+      message: text,
+      standing: 0,
+      isSystem: true
+    })
+    return this.formatMessage({
+      _id: chatMessage._id,
+      userId: null,
+      username: 'AI Oracle',
+      rank: 0,
+      message: text,
+      isSystem: true,
+      createdAt: chatMessage.createdAt
+    })
+  }
+
   async sendMessage(data) {
     const { userId, username, rank, message } = data
     if (userId) {
@@ -87,6 +130,31 @@ class ChatService {
       .populate('userId', 'username rank')
       .lean()
     return docs.reverse().map((d) => this.formatMessage(d))
+  }
+
+  /**
+   * Admin moderation: paginate by newest first (page 1 = most recent messages).
+   * @returns {{ messages: object[], total: number, page: number, pageSize: number, totalPages: number }}
+   */
+  async getRecentMessagesPaged(page = 1, pageSize = 10) {
+    const p = Math.max(1, parseInt(page, 10) || 1)
+    const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 10))
+    const skip = (p - 1) * size
+    const total = await ChatMessage.countDocuments()
+    const docs = await ChatMessage.find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(size)
+      .populate('userId', 'username rank')
+      .lean()
+    const messages = docs.map((d) => this.formatMessage(d))
+    return {
+      messages,
+      total,
+      page: p,
+      pageSize: size,
+      totalPages: Math.max(1, Math.ceil(total / size)),
+    }
   }
 
   /** Update a message; only the owner can update. Returns formatted message or null. */
